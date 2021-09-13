@@ -21,6 +21,7 @@ def parseArgs():
 
     #Options for preprocessing
     parser.add_argument('-b', '--hbeat', type=str, help='AAMI heartbeat symbols to classify')
+    parser.add_argument('-c', '--channel', type=int, help='Channel number to train the model on')
     parser.add_argument('-t', '--test', type=float, nargs='?', default=0.2, help='Ratio of samples that is included in the test dataset')
 
     #Printing arguments to the command line
@@ -78,7 +79,7 @@ def get_stats(data):
     print("Q {}".format(str(unknown)))
 
 
-def split_data(data, hbeat_class, testsize):
+def split_data(data, hbeat_class, channel, testsize):
 
     #Initialising variables
     Xs, ys = [], []
@@ -87,7 +88,7 @@ def split_data(data, hbeat_class, testsize):
     for s in data:
         X, y = [], []
         info = wfdb.rdsamp(s)[1]
-        signals = wfdb.rdsamp(s)[0]
+        signals = wfdb.rdsamp(s)[0][:, channel]
         symbols = wfdb.rdann(s, 'atr').symbol
         samples = wfdb.rdann(s, 'atr').sample
 
@@ -138,7 +139,7 @@ def main():
     get_stats(MLII_subjects)
 
     #Splitting the data into train and test
-    X_train, X_test, y_train, y_test = split_data(MLII_subjects, args.hbeat, args.test)
+    X_train, X_test, y_train, y_test = split_data(MLII_subjects, args.hbeat, args.channel, args.test)
 
     #Saving the train and test datasets
     np.save(os.path.join(path, "data", "train", "X_train.npy"), X_train)
