@@ -1,14 +1,17 @@
 #!/usr/bin/env python
 
 import argparse
+import copy
 import numpy as np
 import os
 import pickle as pkl
+import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
 from collections import deque
+from CNN import ResNet34
 from CustomECGDataset import ECGDataset
 from torch.utils.data import DataLoader
 from torchvision import models
@@ -20,10 +23,6 @@ def parseArgs():
 
     #Options for input and output
     parser.add_argument('--data', type=str, help='Path to the data directory')
-
-    #Options for the model
-    parser.add_argument('--layers', type=str, default="34", help='Number of layers for the ResNet model (18, default=34, 50, 101, 152)')
-    parser.add_argument('--pretrained', type=bool, default=True, nargs='?', help='Indicates whether the ResNet model is pretrained on ImageNet or not (default: True)')
 
     #Options for the optimizer
     parser.add_argument('--lr', type=float, help='ADAM gradient descent optimizer learning rate')
@@ -79,7 +78,7 @@ def load_data(data, path, train):
         return DataLoader(test_data, batch_size=64, shuffle=True)
 
 
-def train_model(model, loss, optimizer, epochs, data_loader, fout):
+def train_model(model, loss, optimizer, epochs, data_loader, fout, device):
 
     #Initialising variables
     pkl_queue = deque()
@@ -87,6 +86,7 @@ def train_model(model, loss, optimizer, epochs, data_loader, fout):
     best_sens = -1.0
     best_loss = 100.0
     best_model_weights = model.state_dict()
+    end = time.time()
 
     print(model, "\n")
 
@@ -105,17 +105,54 @@ def train_model(model, loss, optimizer, epochs, data_loader, fout):
             data = data_loader[phase]
 
             #Initialising more variables
-            running_loss = 0.0
-            normal_correct = 0
+            running_loss = 0
+            running_correct = 0
             ventricular_correct = 0
+            ventricular_size = 0
 
             #Looping over the minibatches
             for idx, (data_train, target_train) in enumerate(data):
                 optimizer.zero_grad()
                 x, y = data_train.to(device), target_train.to(device)
+                print(x)
+                print(x[0])
+                break           ##################################################
 
                 with torch.set_grad_enabled(phase == "train"):
                     y_pred = model(x)
+                    _, predictions = torch.max(y_pred.data, 1)
+                    l = loss(y_pred, y)
+
+                    if phase == "train":
+                        l.backward()
+                        optimizer.step()
+
+                #Calculating statistics
+                running_loss += l.item() * x.size(0)
+                running_correct += torch.eq(predictions, y).sum()
+                ventricular_size += torch.sum(y)
+                ventricular_correct += torch.eq(y + predictions, torch.tensor([2]*len(y)).to(device)).sum().to(device)
+
+            break #######################################
+
+            #Calculating mean statistics
+            epoch_loss = running_loss / len(x)
+            epoch_acc = running_correct.double() / len(x)
+            epoch_sens = 0.0
+            if ventricular_size > 0.0:
+                epoch_sens = float(ventricular_correct) / float(ventricular_size)
+
+            print("\t{} Loss: {:.4f} Acc: {:.4f} Sen: {:.4f} Time: {:.4f}".format(phase, epoch_loss, epoch_acc, epoch_sens, time.time()-end), end="")
+
+
+            #Saving the best acc/sens model for the validation data
+            if phase == "val":
+                if (epoch_acc > best_acc) or (epoch_acc == best_acc and epoch_sens > best_sens):
+                    best_sens = epoch_sens
+                    best_acc = epoch_acc
+                    best_loss = epoch_loss
+                    best_model_weights = copy.deepcopy(model.state_dict())
+#                    torch.save(model.state_dict(), "{}_epoch{}.pkl".format(fout, epoch))
 
 
 
@@ -126,6 +163,8 @@ def main():
 
     #Initialising variables
     path = os.path.join("/".join(os.getcwd().split("/")[:-1]))
+    fdir = os.path.join("/".join(os.getcwd().split("/")[:-1]), "data")
+    fout = os.path.join(fdir, "ResNet34_w{}_lr{}_decay{}".format(args.weight, args.lr, args.decay))
 
     #Checking the data
     check_data(args.data, path)
@@ -138,24 +177,15 @@ def main():
 
     #Initialising the model
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    if args.pretrained:
-        model = models.__dict__["resnet"+args.layers](pretrained=True)
-        model.fc = nn.Linear(model.fc.in_features, 2, bias=True)
-    else:
-        model = models.__dict__["resnet"+args.layers]
-        model.fc = nn.Linear(model.fc.in_features, 2, bias=True)
-
+    model = ResNet34().to(device)
 
     #Settings for training the model
-    model.to(device)
-    fout = os.path.join("/".join(os.getcwd().split("/")[:-1]), "data", "train")
-    epochs = args.epochs
-    weight = torch.FloatTensor([args.weight, 1.])
+    weight = torch.FloatTensor([args.weight, 1.]).to(device)
     loss = nn.CrossEntropyLoss(weight=weight)
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.decay)
 
     #Training the model
-    train_model(model, loss, optimizer, epochs, data_loader, fout)
+    train_model(model, loss, optimizer, args.epochs, data_loader, fout, device)
 
 
 if __name__ == '__main__':

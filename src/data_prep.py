@@ -3,10 +3,23 @@
 import argparse
 import glob
 import numpy as np
+import pywt
 import os
 import wfdb
 from collections import Counter
+from skimage.restoration import denoise_wavelet
 from sklearn.model_selection import train_test_split
+
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() == 'true':
+        return True
+    elif v.lower() == 'false':
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
 def parseArgs():
@@ -15,17 +28,22 @@ def parseArgs():
 
     #Options for input and output
     parser.add_argument('-o', '--output', type=str, help='Name of the output data directory')
-    parser.add_argument('--download', dest='download', action='store_true')
-    parser.add_argument('--no-download', dest='download', action='store_false')
-    parser.set_defaults(download=True)
+    parser.add_argument('-d', '--download', type=str2bool, nargs='?', const=True, default=False, help='Option to download the raw data')
 
     #Options for preprocessing
     parser.add_argument('-b', '--hbeat', type=str, help='AAMI heartbeat symbols to classify')
     parser.add_argument('-c', '--channel', type=int, help='Channel number to train the model on')
-    parser.add_argument('-t', '--test', type=float, nargs='?', default=0.2, help='Ratio of samples that is included in the test dataset')
+    parser.add_argument('--test', type=float, nargs='?', default=0.2, help='Ratio of samples that is included in the test dataset')
+    parser.add_argument('--norm', type=str2bool, nargs='?', const=True, default=False, help='Option to normalize the dataset')
+    parser.add_argument('--denoise', type=str2bool, nargs='?', const=True, default=False, help='Option to denoise the dataset')
+    parser.add_argument('--wavelet', type=str, default='sym8', help='Type of wavelet to perform denoising (default: sym8)')
 
     #Printing arguments to the command line
     args = parser.parse_args()
+
+    #Checking arguments
+    assert args.wavelet in pywt.wavelist(), 'Specified wavelet is not available'
+
     print('Called with args:')
     print(args)
 
@@ -79,7 +97,7 @@ def get_stats(data):
     print("Q {}".format(str(unknown)))
 
 
-def split_data(data, hbeat_class, channel, testsize):
+def load_data(data, hbeat_class, channel, testsize):
 
     #Initialising variables
     Xs, ys = [], []
@@ -113,10 +131,7 @@ def split_data(data, hbeat_class, channel, testsize):
                 Xs.append(np.array(X))
                 ys.append(np.array(y))
 
-    #Splitting the data into train and test
-    X_train, X_test, y_train, y_test = train_test_split(np.vstack(Xs), np.concatenate(ys), test_size=testsize, random_state=0, stratify=np.concatenate(ys))
-
-    return X_train, X_test, y_train, y_test
+    return (np.vstack(Xs), np.concatenate(ys))
 
 
 def main():
@@ -125,6 +140,7 @@ def main():
     args = parseArgs()
 
     #Initialising variables
+    suffix = ""
     path = os.path.join("/".join(os.getcwd().split("/")[:-1]))
 
     #Downloading the MIT-BIH Arrhythmia Database dataset
@@ -138,14 +154,31 @@ def main():
     #Getting an overview of the data
     get_stats(MLII_subjects)
 
+    #Loading the data
+    X, y = load_data(MLII_subjects, args.hbeat, args.channel, args.test)
+
+    print(args.norm)
+    print(args.denoise)
+
+    #Normalizing the data
+    if args.norm:
+        X = (X - np.mean(X) / np.std(X))
+        suffix = "_normalised"
+
     #Splitting the data into train and test
-    X_train, X_test, y_train, y_test = split_data(MLII_subjects, args.hbeat, args.channel, args.test)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=args.test, stratify=y)
+
+    #Denoising the training data
+    if args.denoise:
+        level = int(np.floor(np.log(len(X_train))/2.0))
+        X_denoise = denoise_wavelet(X_train[:,0], wavelet=args.wavelet, mode='soft', wavelet_levels=level, method='BayesShrink', rescale_sigma='True')
+        suffix = "_denoised"
 
     #Saving the train and test datasets
-    np.save(os.path.join(path, "data", "train", "X_train.npy"), X_train)
+    np.save(os.path.join(path, "data", "train", "X_train{}.npy".format(suffix)), X_train)
     np.save(os.path.join(path, "data", "train", "y_train.npy"), y_train)
 
-    np.save(os.path.join(path, "data", "test", "X_test.npy"), X_test)
+    np.save(os.path.join(path, "data", "test", "X_test{}.npy".format(suffix)), X_test)
     np.save(os.path.join(path, "data", "test", "y_test.npy"), y_test)
 
 
