@@ -29,10 +29,9 @@ def parseArgs():
     #Options for input and output
     parser.add_argument('-o', '--output', type=str, help='Name of the output data directory')
     parser.add_argument('-d', '--download', type=str2bool, nargs='?', const=True, default=False, help='Option to download the raw data')
+    parser.add_argument('-v', '--verbose', type=str2bool, nargs='?', const=True, default=False, help='Print verbose messages')
 
     #Options for preprocessing
-    parser.add_argument('-b', '--hbeat', type=str, help='AAMI heartbeat symbols to classify')
-    parser.add_argument('-c', '--channel', type=int, help='Channel number to train the model on')
     parser.add_argument('--test', type=float, nargs='?', default=0.2, help='Ratio of samples that is included in the test dataset')
     parser.add_argument('--norm', type=str2bool, nargs='?', const=True, default=False, help='Option to normalize the dataset')
     parser.add_argument('--denoise', type=str2bool, nargs='?', const=True, default=False, help='Option to denoise the dataset')
@@ -50,9 +49,11 @@ def parseArgs():
     return args
 
 
-def get_stats(data):
+def get_stats(path):
 
     #Initialising variables
+    subjects = [subject for subject in glob.glob(f"{path}/data/raw/*.dat")]
+    data = [subject[:-4] for subject in subjects]
     signal_names, symbol_types = [], []
     normal, supraventricular, ventricular, fusion, unknown = 0, 0, 0, 0, 0
     AAMI_class = {"N": ["N", "L", "R", "e", "j"],
@@ -60,6 +61,9 @@ def get_stats(data):
                   "V": ["V", "E"],
                   "F": ["F"],
                   "Q": ["/", "f", "Q"]}
+
+    #Displaying the number of subjects
+    print("\nNumber of subjects: {}".format(len(subjects)))
 
     #Looping over the patients of the dataset
     for patient in data:
@@ -97,7 +101,7 @@ def get_stats(data):
     print("Q {}".format(str(unknown)))
 
 
-def load_data(data, hbeat_class, channel, testsize):
+def load_data(data, testsize):
 
     #Initialising variables
     Xs, ys = [], []
@@ -106,7 +110,7 @@ def load_data(data, hbeat_class, channel, testsize):
     for s in data:
         X, y = [], []
         info = wfdb.rdsamp(s)[1]
-        signals = wfdb.rdsamp(s)[0][:, channel]
+        signals = wfdb.rdsamp(s)[0][:, 0]
         symbols = wfdb.rdann(s, 'atr').symbol
         samples = wfdb.rdann(s, 'atr').sample
 
@@ -119,11 +123,11 @@ def load_data(data, hbeat_class, channel, testsize):
                 end = samples[i] + int(info["fs"])
 
                 #Saving data from the 2 specified heartbeat classes
-                if symbols[i] in hbeat_class and start >= 0 and end <= len(signals) and len(signals[start:end]) == int(info["fs"])*2:
+                if symbols[i] in "NV" and start >= 0 and end <= len(signals) and len(signals[start:end]) == int(info["fs"])*2:
                     X.append(signals[start:end])
-                    if symbols[i] == hbeat_class[0]:
+                    if symbols[i] == "N":
                         y.append(0)
-                    elif symbols[i] == hbeat_class[1]:
+                    elif symbols[i] == "V":
                         y.append(1)
 
             #Appending the extracted signal to the explanatory and response variable lists
@@ -145,36 +149,49 @@ def main():
 
     #Downloading the MIT-BIH Arrhythmia Database dataset
     if args.download:
+        if args.verbose:
+            print("\nDownloading the dataset...")
         download_dir = os.path.join(path, "data", "raw")
         wfdb.dl_database('mitdb', dl_dir=download_dir)
 
-    #Removing subjects for which a modified limb lead II electrode was not used
-    MLII_subjects = [subject[:-4] for subject in glob.glob(f"{path}/data/raw/*.dat") if wfdb.rdsamp(subject[:-4])[1]["sig_name"][0] == "MLII"]
-
     #Getting an overview of the data
-    get_stats(MLII_subjects)
+    if args.verbose:
+        get_stats(path)
+
+    #Removing subjects for which modified limb lead II (MLII) and modified limb V1 (V1) electrodes were not used
+    if args.verbose:
+        print("\nRemoving subjects for which MLII and V1 electrodes were not used...")
+    MLII_subjects = [subject[:-4] for subject in glob.glob(f"{path}/data/raw/*.dat") if wfdb.rdsamp(subject[:-4])[1]["sig_name"][0] == "MLII" and wfdb.rdsamp(subject[:-4])[1]["sig_name"][1] == "V1"]
+    print("Remaining number of patients: {}".format(len(MLII_subjects)))
 
     #Loading the data
-    X, y = load_data(MLII_subjects, args.hbeat, args.channel, args.test)
-
-    print(args.norm)
-    print(args.denoise)
+    X, y = load_data(MLII_subjects, args.test)
 
     #Normalizing the data
     if args.norm:
+        if args.verbose:
+            print("\nNormalising the dataset...")
         X = (X - np.mean(X) / np.std(X))
         suffix = "_normalised"
 
     #Splitting the data into train and test
+    if args.verbose:
+        print("Splitting the dataset and into train ({}%) and test ({}%)...".format(str(int((1-float(args.test))*100)), str(int(float(args.test)*100))))
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=args.test, stratify=y)
 
     #Denoising the training data
     if args.denoise:
+        if args.verbose:
+            print("Denoising the training dataset...")
         level = int(np.floor(np.log(len(X_train))/2.0))
         X_denoise = denoise_wavelet(X_train[:,0], wavelet=args.wavelet, mode='soft', wavelet_levels=level, method='BayesShrink', rescale_sigma='True')
         suffix = "_denoised"
 
     #Saving the train and test datasets
+    if args.verbose:
+        print("\nSaving the training data in: {}".format(os.path.join(path, "data", "train")))
+        print("Saving the test data in: {}".format(os.path.join(path, "data", "test")))
+
     np.save(os.path.join(path, "data", "train", "X_train{}.npy".format(suffix)), X_train)
     np.save(os.path.join(path, "data", "train", "y_train.npy"), y_train)
 
