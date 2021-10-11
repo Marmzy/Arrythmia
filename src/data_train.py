@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+ #!/usr/bin/env python
 
 import argparse
 import copy
@@ -10,11 +10,22 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from collections import deque
 from CNN import ResNet34
+from collections import deque
 from CustomECGDataset import ECGDataset
 from torch.utils.data import DataLoader
 from torchvision import models
+
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() == 'true':
+        return True
+    elif v.lower() == 'false':
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
 def parseArgs():
@@ -23,58 +34,79 @@ def parseArgs():
 
     #Options for input and output
     parser.add_argument('--data', type=str, help='Path to the data directory')
+    parser.add_argument('--normalised', type=str2bool, nargs='?', const=True, default=False, help='Use the normalised dataset')
+    parser.add_argument('--denoised', type=str2bool, nargs='?', const=True, default=False, help='Use the denoised dataset')
+    parser.add_argument('--verbose', type=str2bool, nargs='?', const=True, default=False, help='Print verbose messages')
 
     #Options for the optimizer
     parser.add_argument('--lr', type=float, help='ADAM gradient descent optimizer learning rate')
     parser.add_argument('--decay', type=float, default=0.0, nargs='?', help='ADAM weight decay (default: 0.0)')
 
-    #Options for the loss function
-    parser.add_argument('--weight', type=float, default=1.0, nargs='?', help='Weight of the Normal heartbeat class for the loss function (default: 1.0)')
+    #Options for class imbalance
+    parser.add_argument('--weight', type=str2bool, nargs='?', const=True, default=False, help='Rescale the weights of the loss function to alleviate class imbalance')
+    parser.add_argument('--sampling', type=str2bool, nargs='?', const=True, default=False, help='Randomly sample heartbeats from the majority class to match the number of the minority class')
 
     #Options for training
     parser.add_argument('--epochs', type=int, help='Number of epochs')
 
     #Printing arguments to the command line
     args = parser.parse_args()
+
+    #Checking arguments
+    assert not (args.normalised and args.denoised), 'Arguments --normalised and --denoised are not compatible. Please choose one.'
+
     print('Called with args:')
     print(args)
 
     return args
 
 
-def check_data(data, path):
+def get_weights(data, path, normalise, denoise, verbose):
+
+    #Initialising variable
+    suffix = ""
+    if normalise:
+        suffix += "_normalised"
+    elif denoise:
+        suffix += "_denoised"
 
     #Loading the data
-    X_train = np.load(os.path.join(path, data, "train", "X_train.npy"))
+    X_train = np.load(os.path.join(path, data, "train", "X_train{}.npy".format(suffix)))
     y_train = np.load(os.path.join(path, data, "train", "y_train.npy"))
 
-    X_test = np.load(os.path.join(path, data, "test", "X_test.npy"))
+    X_test = np.load(os.path.join(path, data, "test", "X_test{}.npy".format(suffix)))
     y_test = np.load(os.path.join(path, data, "test", "y_test.npy"))
-
-    #Checking the input shape of the data
-#    print("\nInput training data shape:\n{}".format(X_train.shape))
-#    print("Input test data shape:\n{}\n".format(X_test.shape))
 
     #Checking for class imbalance
     label0 = y_train.tolist().count(0)
     label1 = y_train.tolist().count(1)
 
-    print("Checking for class imbalance...\n")
-    print("Number of 0 labels: {}".format(label0))
-    print("Number of 1 labels: {}".format(label1))
+    if verbose:
+        print("\nChecking for class imbalance...\n")
+        print("Number of Non-ectopic heartbeats: {}".format(label0))
+        print("Number of Ventricular ectopic heartbeats: {}".format(label1))
+        print("\t=> Dataset imbalance: ~= {:.2f}\n".format(label0 / label1))
 
-    if label0 / label1 > 2 or label0 / label1 < 0.5:
-        print("\t=> The dataset is quite imbalanced: ratio ~= {:.2f}\n".format(label0 / label1))
+    #Calculate weights to alleviate class imbalance
+    weights = [1 - (samples / (label0 + label1)) for samples in [label0, label1]]
+    return weights
 
 
-def load_data(data, path, train):
+def load_data(data, path, normalise, denoise, sampling, train):
+
+    #Initialising variable
+    suffix = ""
+    if normalise:
+        suffix += "_normalised"
+    elif denoise:
+        suffix += "_denoised"
 
     #Constructing the PyTorch DataSet
     if train:
-        train_data = ECGDataset(os.path.join(path, data, "train", "X_train.npy"), os.path.join(path, data, "train", "y_train.npy"))
+        train_data = ECGDataset(os.path.join(path, data, "train", "X_train{}.npy".format(suffix)), os.path.join(path, data, "train", "y_train.npy"), sampling)
         return DataLoader(train_data, batch_size=64, shuffle=True)
     else:
-        test_data = ECGDataset(os.path.join(path, data, "test", "X_test.npy"), os.path.join(path, data, "test", "y_test.npy"))
+        test_data = ECGDataset(os.path.join(path, data, "test", "X_test{}.npy".format(suffix)), os.path.join(path, data, "test", "y_test.npy"), sampling)
         return DataLoader(test_data, batch_size=64, shuffle=True)
 
 
@@ -94,8 +126,9 @@ def train_model(model, loss, optimizer, epochs, data_loader, fout, device):
     for epoch in range(epochs):
         print("Epoch:{}/{}".format(epoch, epochs))
 
-        #Making sure training and validating the model is different
-        for phase in ["train", "val"]:
+        #Making sure training and validating occurs seperately
+#        for phase in ["train", "val"]:
+        for phase in ["train"]:
             if phase == "train":
                 model.train(True)
             else:
@@ -107,6 +140,7 @@ def train_model(model, loss, optimizer, epochs, data_loader, fout, device):
             #Initialising more variables
             running_loss = 0
             running_correct = 0
+            running_train_num = 0
             ventricular_correct = 0
             ventricular_size = 0
 
@@ -114,9 +148,6 @@ def train_model(model, loss, optimizer, epochs, data_loader, fout, device):
             for idx, (data_train, target_train) in enumerate(data):
                 optimizer.zero_grad()
                 x, y = data_train.to(device), target_train.to(device)
-                print(x)
-                print(x[0])
-                break           ##################################################
 
                 with torch.set_grad_enabled(phase == "train"):
                     y_pred = model(x)
@@ -128,16 +159,15 @@ def train_model(model, loss, optimizer, epochs, data_loader, fout, device):
                         optimizer.step()
 
                 #Calculating statistics
-                running_loss += l.item() * x.size(0)
+                running_loss += l.item()
                 running_correct += torch.eq(predictions, y).sum()
+                running_train_num += target_train.size(0)
                 ventricular_size += torch.sum(y)
                 ventricular_correct += torch.eq(y + predictions, torch.tensor([2]*len(y)).to(device)).sum().to(device)
 
-            break #######################################
-
             #Calculating mean statistics
             epoch_loss = running_loss / len(x)
-            epoch_acc = running_correct.double() / len(x)
+            epoch_acc = running_correct.double() / running_train_num
             epoch_sens = 0.0
             if ventricular_size > 0.0:
                 epoch_sens = float(ventricular_correct) / float(ventricular_size)
@@ -167,21 +197,23 @@ def main():
     fout = os.path.join(fdir, "ResNet34_w{}_lr{}_decay{}".format(args.weight, args.lr, args.decay))
 
     #Checking the data
-    check_data(args.data, path)
+    if args.weight:
+        weights = get_weights(args.data, path, args.normalised, args.denoised, args.verbose)
+    else:
+        weights = [1., 1.]
 
     #Loading the data
-    train_data = load_data(args.data, path, train=True)
-    val_data = load_data(args.data, path, train=False)
-    data_loader = {"train": train_data,
-                   "val": val_data}
+    train_data = load_data(args.data, path, args.normalised, args.denoised, args.sampling, train=True)
+    val_data = load_data(args.data, path, args.normalised, args.denoised, args.sampling, train=False)
+    data_loader = {"train": train_data, "val": val_data}
 
     #Initialising the model
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = ResNet34().to(device)
 
     #Settings for training the model
-    weight = torch.FloatTensor([args.weight, 1.]).to(device)
-    loss = nn.CrossEntropyLoss(weight=weight)
+    weights = torch.FloatTensor(weights).to(device)
+    loss = nn.CrossEntropyLoss(weight=weights)
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.decay)
 
     #Training the model
