@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-#Defining the layers that constitute the basic structure of the residual block 
+#Defining the layers that constitute the basic structure of the residual block
 class BaseBlock(nn.Module):
   def __init__(self, input, channels, stride=1, dilate=1):
     self.stride = stride
@@ -40,7 +40,7 @@ class ResBlock(nn.Module):
   def forward(self, x):
     h = self.block0(x)
     for res in self.res:
-      h = res(h)   
+      h = res(h)
     return h
 
 #Defining the structure of the ResNet model

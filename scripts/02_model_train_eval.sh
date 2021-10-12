@@ -7,7 +7,7 @@ function usage(){
     if [ -n "$1" ]; then
         echo -e "${RED}→ $1${CLEAR}"
     fi
-    echo "Usage: $0 [-h help] [-v verbose] [-d data] [-l lr] [-e epochs] [-r rescale] [-i imbalance]"
+    echo "Usage: $0 [-h help] [-v verbose] [-d data] [-l lr] [-e epochs] [-r rescale] [-i imbalance] [-m metric]"
     echo " -h, --help       Print this help and exit"
     echo " -v, --verbose    Print verbose messages"
     echo " -d, --data       Name of the data directory"
@@ -15,8 +15,9 @@ function usage(){
     echo " -e, --epochs     Number of epochs"
     echo " -r, --rescale    Rescale weights for class imbalance"
     echo " -i, --imbalance  Strategy to alleviate class imbalance (sampling | weights)"
+    echo " -m, --metric     Evaluation metric (accuracy | sensitivity)"
     echo ""
-    echo "Example: $0 -d data -l 0.0001 -e 25 -r -i sampling"
+    echo "Example: $0 -d data -l 0.0001 -e 25 -r -i sampling -m accuracy"
     exit 1
 }
 
@@ -30,6 +31,7 @@ while [[ "$#" -gt 0 ]]; do
         -e|--epochs) EPOCHS="$2"; shift ;;
         -r|--rescale) RESCALE=true ;;
         -i|--imbalance) IMBALANCE="$2"; shift ;;
+        -m|--metric) METRIC="$2"; shift ;;
     esac
     shift
 done
@@ -41,6 +43,7 @@ if [ -z "$LR" ]; then usage "Learning rate if not specified"; else VALUE_R=$LR; 
 if [ -z "$EPOCHS" ]; then usage "Number of epochs is not specified"; else VALUE_E=$EPOCHS; fi;
 if [ -z "$RESCALE" ]; then VALUE_R=false; VALUE_R=true; fi;
 if [ -z "$IMBALANCE" ]; then usage "No imbalance strategy is specified"; else VALUE_I=$IMBALANCE; fi;
+if [ -z "$METRIC" ]; then usage "Evaluation metric is not specified"; else VALUE_M=$METRIC; fi;
 
 
 #Asserting the directory exists
@@ -74,4 +77,5 @@ python3 ${PWD%/*}/src/data_train.py \
         --lr $VALUE_R \
         --epochs $VALUE_E \
         --weight $WEIGHTS \
-        --sampling $SAMPLING
+        --sampling $SAMPLING \
+        --metric $VALUE_M

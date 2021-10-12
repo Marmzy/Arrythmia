@@ -48,6 +48,7 @@ def parseArgs():
 
     #Options for training
     parser.add_argument('--epochs', type=int, help='Number of epochs')
+    parser.add_argument('--metric', type=str, default='accuracy', help='Evaluation metric of the model (default: accuracy)')
 
     #Printing arguments to the command line
     args = parser.parse_args()
@@ -110,7 +111,7 @@ def load_data(data, path, normalise, denoise, sampling, train):
         return DataLoader(test_data, batch_size=64, shuffle=True)
 
 
-def train_model(model, loss, optimizer, epochs, data_loader, fout, device):
+def train_model(model, loss, optimizer, epochs, data_loader, fout, device, metric):
 
     #Initialising variables
     pkl_queue = deque()
@@ -118,17 +119,17 @@ def train_model(model, loss, optimizer, epochs, data_loader, fout, device):
     best_sens = -1.0
     best_loss = 100.0
     best_model_weights = model.state_dict()
+    since = time.time()
     end = time.time()
 
     print(model, "\n")
 
     #Looping over the epochs
     for epoch in range(epochs):
-        print("Epoch:{}/{}".format(epoch, epochs))
+        print("Epoch:{}/{}".format(epoch, epochs), end="")
 
         #Making sure training and validating occurs seperately
-#        for phase in ["train", "val"]:
-        for phase in ["train"]:
+        for phase in ["train", "val"]:
             if phase == "train":
                 model.train(True)
             else:
@@ -177,12 +178,29 @@ def train_model(model, loss, optimizer, epochs, data_loader, fout, device):
 
             #Saving the best acc/sens model for the validation data
             if phase == "val":
-                if (epoch_acc > best_acc) or (epoch_acc == best_acc and epoch_sens > best_sens):
-                    best_sens = epoch_sens
-                    best_acc = epoch_acc
-                    best_loss = epoch_loss
-                    best_model_weights = copy.deepcopy(model.state_dict())
-#                    torch.save(model.state_dict(), "{}_epoch{}.pkl".format(fout, epoch))
+                print("\n", end="")
+                if metric == "accuracy":
+                    if (epoch_acc > best_acc) or (epoch_acc == best_acc and epoch_sens > best_sens):
+                        best_sens = epoch_sens
+                        best_acc = epoch_acc
+                        best_loss = epoch_loss
+                        best_model_weights = copy.deepcopy(model.state_dict())
+#                        torch.save(model.state_dict(), "{}_epoch{}.pkl".format(fout, epoch))
+                elif metric == "sensitivity":
+                    if (epoch_sens > best_sens) or (epoch_sens == best_sens and epoch_acc > best_acc):
+                        best_sens = epoch_sens
+                        best_acc = epoch_acc
+                        best_loss = epoch_loss
+                        best_model_weights = copy.deepcopy(model.state_dict())
+#                        torch.save(model.state_dict(), "{}_epoch{}.pkl".format(fout, epoch))
+
+            end = time.time()
+
+    #Print overall training information
+    time_elapsed = time.time() - since
+    print("\nTraining completed in {:.0f}m {:.0f}s".format(time_elapsed // 60, time_elapsed % 60))
+    print("Best val acc: {:.4f}".format(best_acc))
+    print("Best val sens: {:.4f}".format(best_sens))
 
 
 
@@ -217,8 +235,9 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.decay)
 
     #Training the model
-    train_model(model, loss, optimizer, args.epochs, data_loader, fout, device)
+    train_model(model, loss, optimizer, args.epochs, data_loader, fout, device, args.metric)
 
 
 if __name__ == '__main__':
     main()
+
