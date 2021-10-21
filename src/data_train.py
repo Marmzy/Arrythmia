@@ -37,6 +37,7 @@ def parseArgs():
     parser.add_argument('--normalised', type=str2bool, nargs='?', const=True, default=False, help='Use the normalised dataset')
     parser.add_argument('--denoised', type=str2bool, nargs='?', const=True, default=False, help='Use the denoised dataset')
     parser.add_argument('--verbose', type=str2bool, nargs='?', const=True, default=False, help='Print verbose messages')
+    parser.add_argument('--kfold', type=int, help='Number of cross-validation folds to split the training dataset into')
 
     #Options for the optimizer
     parser.add_argument('--lr', type=float, help='ADAM gradient descent optimizer learning rate')
@@ -62,7 +63,7 @@ def parseArgs():
     return args
 
 
-def get_weights(data, path, normalise, denoise, verbose):
+def get_weights(data, path, normalise, denoise, k, verbose):
 
     #Initialising variable
     suffix = ""
@@ -72,11 +73,11 @@ def get_weights(data, path, normalise, denoise, verbose):
         suffix += "_denoised"
 
     #Loading the data
-    X_train = np.load(os.path.join(path, data, "train", "X_train{}.npy".format(suffix)))
-    y_train = np.load(os.path.join(path, data, "train", "y_train.npy"))
+    X_train = np.load(os.path.join(path, data, "train", "X_train{}_{}.npy".format(suffix, k)))
+    y_train = np.load(os.path.join(path, data, "train", "y_train_{}.npy".format(k)))
 
-    X_test = np.load(os.path.join(path, data, "test", "X_test{}.npy".format(suffix)))
-    y_test = np.load(os.path.join(path, data, "test", "y_test.npy"))
+    X_test = np.load(os.path.join(path, data, "test", "X_test{}_{}.npy".format(suffix, k)))
+    y_test = np.load(os.path.join(path, data, "test", "y_test_{}.npy".format(k)))
 
     #Checking for class imbalance
     label0 = y_train.tolist().count(0)
@@ -93,7 +94,7 @@ def get_weights(data, path, normalise, denoise, verbose):
     return weights
 
 
-def load_data(data, path, normalise, denoise, sampling, train):
+def load_data(data, path, normalise, denoise, k, train):
 
     #Initialising variable
     suffix = ""
@@ -104,14 +105,14 @@ def load_data(data, path, normalise, denoise, sampling, train):
 
     #Constructing the PyTorch DataSet
     if train:
-        train_data = ECGDataset(os.path.join(path, data, "train", "X_train{}.npy".format(suffix)), os.path.join(path, data, "train", "y_train.npy"), sampling)
+        train_data = ECGDataset(os.path.join(path, data, "train", "X_train{}_{}.npy".format(suffix, k)), os.path.join(path, data, "train", "y_train_{}.npy".format(k)))
         return DataLoader(train_data, batch_size=64, shuffle=True)
     else:
-        test_data = ECGDataset(os.path.join(path, data, "test", "X_test{}.npy".format(suffix)), os.path.join(path, data, "test", "y_test.npy"), sampling)
-        return DataLoader(test_data, batch_size=64, shuffle=True)
+        val_data = ECGDataset(os.path.join(path, data, "val", "X_val{}_{}.npy".format(suffix, k)), os.path.join(path, data, "val", "y_val_{}.npy".format(k)))
+        return DataLoader(val_data, batch_size=64, shuffle=True)
 
 
-def train_model(model, loss, optimizer, epochs, data_loader, fout, device, metric):
+def train_model(model, loss, optimizer, epochs, data_loader, k, fout, device, metric, verbose):
 
     #Initialising variables
     pkl_queue = deque()
@@ -122,85 +123,105 @@ def train_model(model, loss, optimizer, epochs, data_loader, fout, device, metri
     since = time.time()
     end = time.time()
 
-    print(model, "\n")
+    with open(fout + ".log", "w") as f:
+        if verbose:
+            print(model, "\n")
+        print(model, "\n", file=f)
 
-    #Looping over the epochs
-    for epoch in range(epochs):
-        print("Epoch:{}/{}".format(epoch, epochs), end="")
+        print("Analysing cross-validation fold {}...".format(k))
+        print("Analysing cross-validation fold {}...".format(k), file=f)
 
-        #Making sure training and validating occurs seperately
-        for phase in ["train", "val"]:
-            if phase == "train":
-                model.train(True)
-            else:
-                model.train(False)
+        #Looping over the epochs
+        for epoch in range(epochs):
+            print("Epoch:{}/{}".format(epoch+1, epochs), end="")
+            print("Epoch:{}/{}".format(epoch+1, epochs), end="", file=f)
 
-            #Setting the data
-            data = data_loader[phase]
+            #Making sure training and validating occurs seperately
+            for phase in ["train", "val"]:
+                if phase == "train":
+                    model.train(True)
+                else:
+                    model.train(False)
 
-            #Initialising more variables
-            running_loss = 0
-            running_correct = 0
-            running_train_num = 0
-            ventricular_correct = 0
-            ventricular_size = 0
+                #Setting the data
+                data = data_loader[phase]
 
-            #Looping over the minibatches
-            for idx, (data_train, target_train) in enumerate(data):
-                optimizer.zero_grad()
-                x, y = data_train.to(device), target_train.to(device)
+                #Initialising more variables
+                running_loss = 0
+                running_correct = 0
+                running_train_num = 0
+                ventricular_correct = 0
+                ventricular_size = 0
 
-                with torch.set_grad_enabled(phase == "train"):
-                    y_pred = model(x)
-                    _, predictions = torch.max(y_pred.data, 1)
-                    l = loss(y_pred, y)
+                #Looping over the minibatches
+                for idx, (data_train, target_train) in enumerate(data):
+                    optimizer.zero_grad()
+                    x, y = data_train.to(device), target_train.to(device)
 
-                    if phase == "train":
-                        l.backward()
-                        optimizer.step()
+                    with torch.set_grad_enabled(phase == "train"):
+                        y_pred = model(x)
+                        _, predictions = torch.max(y_pred.data, 1)
+                        l = loss(y_pred, y)
 
-                #Calculating statistics
-                running_loss += l.item()
-                running_correct += torch.eq(predictions, y).sum()
-                running_train_num += target_train.size(0)
-                ventricular_size += torch.sum(y)
-                ventricular_correct += torch.eq(y + predictions, torch.tensor([2]*len(y)).to(device)).sum().to(device)
+                        if phase == "train":
+                            l.backward()
+                            optimizer.step()
 
-            #Calculating mean statistics
-            epoch_loss = running_loss / len(x)
-            epoch_acc = running_correct.double() / running_train_num
-            epoch_sens = 0.0
-            if ventricular_size > 0.0:
-                epoch_sens = float(ventricular_correct) / float(ventricular_size)
+                    #Calculating statistics
+                    running_loss += l.item()
+                    running_correct += torch.eq(predictions, y).sum()
+                    running_train_num += target_train.size(0)
+                    ventricular_size += torch.sum(y)
+                    ventricular_correct += torch.eq(y + predictions, torch.tensor([2]*len(y)).to(device)).sum().to(device)
 
-            print("\t{} Loss: {:.4f} Acc: {:.4f} Sen: {:.4f} Time: {:.4f}".format(phase, epoch_loss, epoch_acc, epoch_sens, time.time()-end), end="")
+                #Calculating mean statistics
+                epoch_loss = running_loss / len(x)
+                epoch_acc = running_correct.double() / running_train_num
+                epoch_sens = 0.0
+                if ventricular_size > 0.0:
+                    epoch_sens = float(ventricular_correct) / float(ventricular_size)
+
+                print("\t{} Loss: {:06.4f} Acc: {:06.4f} Sen: {:06.4f} Time: {:06.4f}".format(phase, epoch_loss, epoch_acc, epoch_sens, time.time()-end), end="")
+                print("\t{} Loss: {:06.4f} Acc: {:06.4f} Sen: {:06.4f} Time: {:06.4f}".format(phase, epoch_loss, epoch_acc, epoch_sens, time.time()-end), end="", file=f)
 
 
-            #Saving the best acc/sens model for the validation data
-            if phase == "val":
-                print("\n", end="")
-                if metric == "accuracy":
-                    if (epoch_acc > best_acc) or (epoch_acc == best_acc and epoch_sens > best_sens):
-                        best_sens = epoch_sens
-                        best_acc = epoch_acc
-                        best_loss = epoch_loss
-                        best_model_weights = copy.deepcopy(model.state_dict())
-#                        torch.save(model.state_dict(), "{}_epoch{}.pkl".format(fout, epoch))
-                elif metric == "sensitivity":
-                    if (epoch_sens > best_sens) or (epoch_sens == best_sens and epoch_acc > best_acc):
-                        best_sens = epoch_sens
-                        best_acc = epoch_acc
-                        best_loss = epoch_loss
-                        best_model_weights = copy.deepcopy(model.state_dict())
-#                        torch.save(model.state_dict(), "{}_epoch{}.pkl".format(fout, epoch))
+                #Saving the best acc/sens model for the validation data
+                if phase == "val":
+                    print("\n", end="")
+                    print("\n", end="", file=f)
+                    if metric == "accuracy":
+                        if (epoch_acc > best_acc) or (epoch_acc == best_acc and epoch_sens > best_sens):
+                            best_sens = epoch_sens
+                            best_acc = epoch_acc
+                            best_loss = epoch_loss
+                            best_model_weights = copy.deepcopy(model.state_dict())
+                            torch.save(model.state_dict(), "{}_epoch{}.pkl".format(fout, epoch+1))
+                            pkl_queue.append("{}_epoch{}.pkl".format(fout, epoch+1))
+                            if len(pkl_queue) > 1:
+                                pkl_file = pkl_queue.popleft()
+                                os.remove(pkl_file)
+                    elif metric == "sensitivity":
+                        if (epoch_sens > best_sens) or (epoch_sens == best_sens and epoch_acc > best_acc):
+                            best_sens = epoch_sens
+                            best_acc = epoch_acc
+                            best_loss = epoch_loss
+                            best_model_weights = copy.deepcopy(model.state_dict())
+                            torch.save(model.state_dict(), "{}_epoch{}.pkl".format(fout, epoch+1))
+                            pkl_queue.append("{}_epoch{}.pkl".format(fout, epoch+1))
+                            if len(pkl_queue) > 1:
+                                pkl_file = pkl_queue.popleft()
+                                os.remove(pkl_file)
 
-            end = time.time()
+                end = time.time()
 
-    #Print overall training information
-    time_elapsed = time.time() - since
-    print("\nTraining completed in {:.0f}m {:.0f}s".format(time_elapsed // 60, time_elapsed % 60))
-    print("Best val acc: {:.4f}".format(best_acc))
-    print("Best val sens: {:.4f}".format(best_sens))
+        #Print overall training information
+        time_elapsed = time.time() - since
+        print("\nTraining completed in {:.0f}m {:.0f}s".format(time_elapsed // 60, time_elapsed % 60))
+        print("\nTraining completed in {:.0f}m {:.0f}s".format(time_elapsed // 60, time_elapsed % 60), file=f)
+        print("Best val acc: {:.4f}".format(best_acc))
+        print("Best val acc: {:.4f}".format(best_acc), file=f)
+        print("Best val sens: {:.4f}\n".format(best_sens))
+        print("Best val sens: {:.4f}".format(best_sens), file=f)
 
 
 
@@ -209,33 +230,42 @@ def main():
     #Parse arguments from the command line
     args = parseArgs()
 
-    #Initialising variables
-    path = os.path.join("/".join(os.getcwd().split("/")[:-1]))
-    fdir = os.path.join("/".join(os.getcwd().split("/")[:-1]), "data")
-    fout = os.path.join(fdir, "ResNet34_w{}_lr{}_decay{}".format(args.weight, args.lr, args.decay))
+    #Looping over the K folds
+    for k in range(args.kfold):
 
-    #Checking the data
-    if args.weight:
-        weights = get_weights(args.data, path, args.normalised, args.denoised, args.verbose)
-    else:
-        weights = [1., 1.]
+        #Initialising variables
+        path = os.path.join("/".join(os.getcwd().split("/")[:-1]))
+        fdir = os.path.join("/".join(os.getcwd().split("/")[:-1]), "data", "output")
+        if args.weight:
+            fout = os.path.join(fdir, "ResNet34_weighted_lr{}_decay{}_{}_fold{}".format(args.lr, args.decay, args.metric, k))
+        elif args.sampling:
+            fout = os.path.join(fdir, "ResNet34_sampled_lr{}_decay{}_{}_fold{}".format(args.lr, args.decay, args.metric, k))
 
-    #Loading the data
-    train_data = load_data(args.data, path, args.normalised, args.denoised, args.sampling, train=True)
-    val_data = load_data(args.data, path, args.normalised, args.denoised, args.sampling, train=False)
-    data_loader = {"train": train_data, "val": val_data}
 
-    #Initialising the model
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    model = ResNet34().to(device)
+        #Checking the data
+        if args.weight:
+            weights = get_weights(args.data, path, args.normalised, args.denoised, k, args.verbose)
+        else:
+            weights = [1., 1.]
 
-    #Settings for training the model
-    weights = torch.FloatTensor(weights).to(device)
-    loss = nn.CrossEntropyLoss(weight=weights)
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.decay)
+        #Loading the data
+        if args.verbose:
+            print("Loading dataset {}...")
+        train_data = load_data(args.data, path, args.normalised, args.denoised, k, train=True)
+        val_data = load_data(args.data, path, args.normalised, args.denoised, k, train=False)
+        data_loader = {"train": train_data, "val": val_data}
 
-    #Training the model
-    train_model(model, loss, optimizer, args.epochs, data_loader, fout, device, args.metric)
+        #Initialising the model
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        model = ResNet34().to(device)
+
+        #Settings for training the model
+        weights = torch.FloatTensor(weights).to(device)
+        loss = nn.CrossEntropyLoss(weight=weights)
+        optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.decay)
+
+        #Training the model
+        train_model(model, loss, optimizer, args.epochs, data_loader, k, fout, device, args.metric, args.verbose)
 
 
 if __name__ == '__main__':
