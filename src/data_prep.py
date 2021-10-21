@@ -175,26 +175,10 @@ def main():
     #Loading the data
     X, y = load_data(MLII_subjects, args.test)
 
-    #Normalizing the data
-    if args.norm:
-        if args.verbose:
-            print("\nNormalising the dataset...")
-        X = (X - np.mean(X) / np.std(X))
-        suffix = "_normalised"
-
     #Splitting the data into (temporary) train and test
     if args.verbose:
         print("Splitting the dataset and into train ({}%) and test ({}%)...".format(str(int((1-float(args.test))*100)), str(int(float(args.test)*100))))
     X_temp, X_test, y_temp, y_test = train_test_split(X, y, test_size=args.test, stratify=y)
-
-    #Denoising the training data
-    if args.denoise:
-        if args.verbose:
-            print("Denoising the training dataset...")
-        level = int(np.floor(np.log(len(X_temp))/2.0))
-        X_temp = denoise_wavelet(X_temp[:, 0:], wavelet=args.wavelet, mode='soft', wavelet_levels=level, method='BayesShrink', rescale_sigma='True')
-        X_test = denoise_wavelet(X_test[:, 0:], wavelet=args.wavelet, mode='soft', wavelet_levels=level, method='BayesShrink', rescale_sigma='True')
-        suffix = "_denoised"
 
     #Taking random samples from the majority class equal to the number in the minority class
     if args.sampling:
@@ -214,6 +198,17 @@ def main():
         if args.verbose:
             print("Sampled majority class samples: {}".format(X_major_sampled.shape[0]))
 
+    #Normalizing the test dataset
+    if args.norm:
+        X_test = (X_test - np.mean(X_test) / np.std(X_test))
+        suffix = "_normalised"
+
+    #Denoising the test dataset
+    if args.denoise:
+        level_test = int(np.floor(np.log(len(X_test))/2.0))
+        X_test = denoise_wavelet(X_test[:, 0:], wavelet=args.wavelet, mode='soft', wavelet_levels=level_test, method='BayesShrink', rescale_sigma='True')
+        suffix = "_denoised"
+
     #Splitting the temporary training dataset into K training and validation datasets
     if args.verbose:
         print("\nSplitting the temporary training dataset into {} folds...".format(args.kfold))
@@ -225,6 +220,22 @@ def main():
 
         X_train, X_val = X_temp[train_index], X_temp[val_index]
         y_train, y_val = y_temp[train_index], y_temp[val_index]
+
+        #Normalizing the train and validation datasets
+        if args.norm:
+            if args.verbose:
+                print("\nNormalising the datasets...")
+            X_train = (X_train - np.mean(X_train) / np.std(X_train))
+            X_val = (X_val - np.mean(X_val) / np.std(X_cal))
+
+        #Denoising the train and validation datasets
+        if args.denoise:
+            if args.verbose:
+                print("Denoising the datasets...")
+            level_train = int(np.floor(np.log(len(X_train))/2.0))
+            level_val = int(np.floor(np.log(len(X_val))/2.0))
+            X_train = denoise_wavelet(X_train[:, 0:], wavelet=args.wavelet, mode='soft', wavelet_levels=level_train, method='BayesShrink', rescale_sigma='True')
+            X_val = denoise_wavelet(X_val[:, 0:], wavelet=args.wavelet, mode='soft', wavelet_levels=level_val, method='BayesShrink', rescale_sigma='True')
 
         #Saving the train and validation datasets
         np.save(os.path.join(path, "data", "train", "X_train{}_{}.npy".format(suffix, idx)), X_train)
