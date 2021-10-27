@@ -25,7 +25,7 @@ def str2bool(v):
     elif v.lower() == 'false':
         return False
     else:
-        raise argparse.ArgumentTypeError('Boolean value expected.')
+        raise argparse.ArgumentTypeError('Boolean value expected')
 
 
 def parseArgs():
@@ -36,16 +36,16 @@ def parseArgs():
     parser.add_argument('--data', type=str, help='Path to the data directory')
     parser.add_argument('--normalised', type=str2bool, nargs='?', const=True, default=False, help='Use the normalised dataset')
     parser.add_argument('--denoised', type=str2bool, nargs='?', const=True, default=False, help='Use the denoised dataset')
-    parser.add_argument('--verbose', type=str2bool, nargs='?', const=True, default=False, help='Print verbose messages')
     parser.add_argument('--kfold', type=int, help='Number of cross-validation folds to split the training dataset into')
+    parser.add_argument('--verbose', type=str2bool, nargs='?', const=True, default=False, help='Print verbose messages')
 
     #Options for the optimizer
-    parser.add_argument('--lr', type=float, help='ADAM gradient descent optimizer learning rate')
     parser.add_argument('--decay', type=float, default=0.0, nargs='?', help='ADAM weight decay (default: 0.0)')
+    parser.add_argument('--lr', type=float, help='ADAM gradient descent optimizer learning rate')
 
     #Options for class imbalance
-    parser.add_argument('--weight', type=str2bool, nargs='?', const=True, default=False, help='Rescale the weights of the loss function to alleviate class imbalance')
     parser.add_argument('--sampling', type=str2bool, nargs='?', const=True, default=False, help='Randomly sample heartbeats from the majority class to match the number of the minority class')
+    parser.add_argument('--weight', type=str2bool, nargs='?', const=True, default=False, help='Rescale the weights of the loss function to alleviate class imbalance')
 
     #Options for training
     parser.add_argument('--epochs', type=int, help='Number of epochs')
@@ -73,11 +73,7 @@ def get_weights(data, path, normalise, denoise, k, verbose):
         suffix += "_denoised"
 
     #Loading the data
-    X_train = np.load(os.path.join(path, data, "train", "X_train{}_{}.npy".format(suffix, k)))
     y_train = np.load(os.path.join(path, data, "train", "y_train_{}.npy".format(k)))
-
-    X_test = np.load(os.path.join(path, data, "test", "X_test{}_{}.npy".format(suffix, k)))
-    y_test = np.load(os.path.join(path, data, "test", "y_test_{}.npy".format(k)))
 
     #Checking for class imbalance
     label0 = y_train.tolist().count(0)

@@ -226,7 +226,7 @@ def main():
             if args.verbose:
                 print("\nNormalising the datasets...")
             X_train = (X_train - np.mean(X_train) / np.std(X_train))
-            X_val = (X_val - np.mean(X_val) / np.std(X_cal))
+            X_val = (X_val - np.mean(X_val) / np.std(X_val))
 
         #Denoising the train and validation datasets
         if args.denoise:
