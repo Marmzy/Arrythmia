@@ -49,6 +49,7 @@ def parseArgs():
 
     #Options for training
     parser.add_argument('--epochs', type=int, help='Number of epochs')
+    parser.add_argument('--batch', type=int, help='Minibatch size')
     parser.add_argument('--metric', type=str, default='accuracy', help='Evaluation metric of the model (default: accuracy)')
 
     #Printing arguments to the command line
@@ -90,7 +91,7 @@ def get_weights(data, path, normalise, denoise, k, verbose):
     return weights
 
 
-def load_data(data, path, normalise, denoise, k, train):
+def load_data(data, path, normalise, denoise, batch, k, train):
 
     #Initialising variable
     suffix = ""
@@ -102,10 +103,10 @@ def load_data(data, path, normalise, denoise, k, train):
     #Constructing the PyTorch DataSet
     if train:
         train_data = ECGDataset(os.path.join(path, data, "train", "X_train{}_{}.npy".format(suffix, k)), os.path.join(path, data, "train", "y_train_{}.npy".format(k)))
-        return DataLoader(train_data, batch_size=64, shuffle=True)
+        return DataLoader(train_data, batch_size=batch, shuffle=True)
     else:
         val_data = ECGDataset(os.path.join(path, data, "val", "X_val{}_{}.npy".format(suffix, k)), os.path.join(path, data, "val", "y_val_{}.npy".format(k)))
-        return DataLoader(val_data, batch_size=64, shuffle=True)
+        return DataLoader(val_data, batch_size=batch, shuffle=True)
 
 
 def train_model(model, loss, optimizer, epochs, data_loader, k, fout, device, metric, verbose):
@@ -119,7 +120,7 @@ def train_model(model, loss, optimizer, epochs, data_loader, k, fout, device, me
     since = time.time()
     end = time.time()
 
-    with open(fout + ".log", "w") as f:
+    with open(fout, "w") as f:
         if verbose:
             print(model, "\n")
         print(model, "\n", file=f)
@@ -232,11 +233,21 @@ def main():
         #Initialising variables
         path = os.path.join("/".join(os.getcwd().split("/")[:-1]))
         fdir = os.path.join("/".join(os.getcwd().split("/")[:-1]), "data", "output")
-        if args.weight:
-            fout = os.path.join(fdir, "ResNet34_weighted_lr{}_decay{}_{}_fold{}".format(args.lr, args.decay, args.metric, k))
-        elif args.sampling:
-            fout = os.path.join(fdir, "ResNet34_sampled_lr{}_decay{}_{}_fold{}".format(args.lr, args.decay, args.metric, k))
 
+        if args.weight:
+            fname = "ResNet34_weighted_lr{}_decay{}_epochs{}_batch{}_{}".format(args.lr, args.decay, args.epochs, args.batch, args.metric)
+            if os.path.isdir(os.path.join(fdir, fname)):
+                fout = os.path.join(fdir, fname, fname + "_fold{}.log".format(k))
+            else:
+                os.makedirs(os.path.join(fdir, fname))
+                fout = os.path.join(fdir, fname, fname + "_fold{}.log".format(k))
+        elif args.sampling:
+            fname = "ResNet34_sampled_lr{}_decay{}_epochs{}_batch{}_{}".format(args.lr, args.decay, args.ecpohs, args.batch, args.metric)
+            if os.path.isdir(os.path.join(fdir, fname)):
+                fout = os.path.join(fdir, fname, fname + "_fold{}.log".format(k))
+            else:
+                os.makedirs(os.path.join(fdir, fname))
+                fout = os.path.join(fdir, fname, fname + "_fold{}.log".format(k))
 
         #Checking the data
         if args.weight:
@@ -246,9 +257,9 @@ def main():
 
         #Loading the data
         if args.verbose:
-            print("Loading dataset {}...")
-        train_data = load_data(args.data, path, args.normalised, args.denoised, k, train=True)
-        val_data = load_data(args.data, path, args.normalised, args.denoised, k, train=False)
+            print("Loading train dataset {}...".format(k))
+        train_data = load_data(args.data, path, args.normalised, args.denoised, args.batch, k, train=True)
+        val_data = load_data(args.data, path, args.normalised, args.denoised, args.batch, k, train=False)
         data_loader = {"train": train_data, "val": val_data}
 
         #Initialising the model

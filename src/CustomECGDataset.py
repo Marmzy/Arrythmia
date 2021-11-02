@@ -14,7 +14,7 @@ class ECGDataset(Dataset):
         self.labels = np.load(y_path)
 
     def __len__(self):
-        return len(self.labels)
+        return len(self.signal)
 
     def __getitem__(self, idx):
         signal = self.signal[None, idx].astype(np.float32)
