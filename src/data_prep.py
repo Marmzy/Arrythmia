@@ -180,24 +180,6 @@ def main():
         print("Splitting the dataset and into train ({}%) and test ({}%)...".format(str(int((1-float(args.test))*100)), str(int(float(args.test)*100))))
     X_temp, X_test, y_temp, y_test = train_test_split(X, y, test_size=args.test, stratify=y)
 
-    #Taking random samples from the majority class equal to the number in the minority class
-    if args.sampling:
-        X_major = X_temp[np.where(y_temp==0)]
-        y_major = y_temp[np.where(y_temp==0)]
-        X_minor = X_temp[np.where(y_temp==1)]
-        y_minor = y_temp[np.where(y_temp==1)]
-
-        if args.verbose:
-            print("\nTaking random samples from the majority class ({})...".format(X_major.shape[0]))
-
-        X_major_sampled = X_major[np.random.choice(X_major.shape[0], X_minor.shape[0], replace=False)]
-        y_major_sampled = y_major[np.random.choice(y_major.shape[0], y_minor.shape[0], replace=False)]
-        X_temp = np.concatenate((X_major_sampled, X_minor), axis=0)
-        y_temp = np.concatenate((y_major_sampled, y_minor), axis=0)
-
-        if args.verbose:
-            print("Sampled majority class samples: {}".format(X_major_sampled.shape[0]))
-
     #Normalizing the test dataset
     if args.norm:
         X_test = (X_test - np.mean(X_test) / np.std(X_test))
@@ -207,7 +189,10 @@ def main():
     if args.denoise:
         level_test = int(np.floor(np.log(len(X_test))/2.0))
         X_test = denoise_wavelet(X_test[:, 0:], wavelet=args.wavelet, mode='soft', wavelet_levels=level_test, method='BayesShrink', rescale_sigma='True')
-        suffix = "_denoised"
+        if suffix:
+            suffix += "_denoised"
+        else:
+            suffix = "_denoised"
 
     #Splitting the temporary training dataset into K training and validation datasets
     if args.verbose:
@@ -220,6 +205,24 @@ def main():
 
         X_train, X_val = X_temp[train_index], X_temp[val_index]
         y_train, y_val = y_temp[train_index], y_temp[val_index]
+
+        #Taking random samples from the majority class equal to the number in the minority class
+        if args.sampling:
+            X_major = X_train[np.where(y_train==0)]
+            y_major = y_train[np.where(y_train==0)]
+            X_minor = X_train[np.where(y_train==1)]
+            y_minor = y_train[np.where(y_train==1)]
+
+            if args.verbose:
+                print("\nTaking random samples from the majority class ({})...".format(X_major.shape[0]))
+
+            X_major_sampled = X_major[np.random.choice(X_major.shape[0], X_minor.shape[0], replace=False)]
+            y_major_sampled = y_major[np.random.choice(y_major.shape[0], y_minor.shape[0], replace=False)]
+            X_train = np.concatenate((X_major_sampled, X_minor), axis=0)
+            y_train = np.concatenate((y_major_sampled, y_minor), axis=0)
+
+            if args.verbose:
+                print("Sampled majority class samples: {}".format(X_major_sampled.shape[0]))
 
         #Normalizing the train and validation datasets
         if args.norm:

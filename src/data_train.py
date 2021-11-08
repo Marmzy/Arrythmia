@@ -120,7 +120,7 @@ def train_model(model, loss, optimizer, epochs, data_loader, k, fout, device, me
     since = time.time()
     end = time.time()
 
-    with open(fout, "w") as f:
+    with open(fout + ".log", "w") as f:
         if verbose:
             print(model, "\n")
         print(model, "\n", file=f)
@@ -233,21 +233,33 @@ def main():
         #Initialising variables
         path = os.path.join("/".join(os.getcwd().split("/")[:-1]))
         fdir = os.path.join("/".join(os.getcwd().split("/")[:-1]), "data", "output")
+        infix = ""
+        if args.normalised:
+            infix += "_normalised"
+        if args.denoised:
+            infix += "_denoised"
 
+        #Creating the output dir/file name
         if args.weight:
-            fname = "ResNet34_weighted_lr{}_decay{}_epochs{}_batch{}_{}".format(args.lr, args.decay, args.epochs, args.batch, args.metric)
+            fname = "ResNet34_weighted{}_lr{}_decay{}_epochs{}_batch{}_{}".format(infix, args.lr, args.decay, args.epochs, args.batch, args.metric)
+
+            #Creating the output directory if it does not yet exist
             if os.path.isdir(os.path.join(fdir, fname)):
-                fout = os.path.join(fdir, fname, fname + "_fold{}.log".format(k))
+                fout = os.path.join(fdir, fname, fname + "_fold{}".format(k))
             else:
                 os.makedirs(os.path.join(fdir, fname))
-                fout = os.path.join(fdir, fname, fname + "_fold{}.log".format(k))
+                fout = os.path.join(fdir, fname, fname + "_fold{}".format(k))
+
+        #Creating the output dir/file name
         elif args.sampling:
-            fname = "ResNet34_sampled_lr{}_decay{}_epochs{}_batch{}_{}".format(args.lr, args.decay, args.ecpohs, args.batch, args.metric)
+            fname = "ResNet34_sampled{}_lr{}_decay{}_epochs{}_batch{}_{}".format(infix, args.lr, args.decay, args.epochs, args.batch, args.metric)
+
+            #Creating the output directory if it does not yet exist
             if os.path.isdir(os.path.join(fdir, fname)):
-                fout = os.path.join(fdir, fname, fname + "_fold{}.log".format(k))
+                fout = os.path.join(fdir, fname, fname + "_fold{}".format(k))
             else:
                 os.makedirs(os.path.join(fdir, fname))
-                fout = os.path.join(fdir, fname, fname + "_fold{}.log".format(k))
+                fout = os.path.join(fdir, fname, fname + "_fold{}".format(k))
 
         #Checking the data
         if args.weight:

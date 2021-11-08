@@ -122,7 +122,7 @@ def score(fout):
 
     #Loading the predictions data
     df = pd.read_csv(fout, sep="\t")
-    truth = df.loc[:, "Ground Truth"].to_numpy()
+    truth = df.loc[:, "GroundTruth"].to_numpy()
     preds = df.loc[:, "Prediction"].to_numpy()
 
     #Calculating various metrics
@@ -133,9 +133,15 @@ def score(fout):
     precision = tp / (tp + fp)
     f1_score = tp / (tp + (0.5 * (fp + fn)))
     auc_score = roc_auc_score(truth, preds)
-    print("\nModel evaluation metrics:")
-    print("Accuracy\tSensitivity\tSpecificity\tPrecision\tF1-Score\tAUC Score")
-    print("{:.5f}\t\t{:.5f}\t\t{:.5f}\t\t{:.5f}\t\t{:.5f}\t\t{:.5f}".format(accuracy, sensitivity, specificity, precision, f1_score, auc_score))
+
+    #Outputting the metrics
+    with open(fout, "a") as f:
+        print("\nModel evaluation metrics:")
+        print("\nModel evaluation metrics:", file=f)
+        print("Accuracy\tSensitivity\tSpecificity\tPrecision\tF1-Score\tAUC Score")
+        print("Accuracy\tSensitivity\tSpecificity\tPrecision\tF1-Score\tAUC Score", file=f)
+        print("{:.5f}\t\t{:.5f}\t\t{:.5f}\t\t{:.5f}\t\t{:.5f}\t\t{:.5f}".format(accuracy, sensitivity, specificity, precision, f1_score, auc_score))
+        print("{:.5f}\t\t{:.5f}\t\t{:.5f}\t\t{:.5f}\t\t{:.5f}\t\t{:.5f}".format(accuracy, sensitivity, specificity, precision, f1_score, auc_score), file=f)
 
 
 def main():
@@ -147,11 +153,11 @@ def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     path = os.path.join("/".join(os.getcwd().split("/")[:-1]))
     test_dir = os.path.join(path, args.indir, "test")
-    fout = os.path.join(path, args.indir, "output", args.infiles + "_predictions.txt")
+    fout = os.path.join(path, args.indir, "output", args.infiles, args.infiles + "_predictions.txt")
 
     #Writing the header to the output file
     with open(fout, 'w') as f:
-        f.write("Prediction\tGround Truth\tProbClass0\tProbClass1\n")
+        f.write("Prediction\tGroundTruth\tProbClass0\tProbClass1\n")
 
     #Loading the test dataset
     if args.verbose:
@@ -163,7 +169,7 @@ def main():
     for k in range(args.kfold):
 
         #Initialising the model
-        trained_model = glob.glob(os.path.join(path, args.indir, "output", args.infiles + "_fold{}*.pkl".format(k)))[0]
+        trained_model = glob.glob(os.path.join(path, args.indir, "output", args.infiles, args.infiles + "_fold{}*.pkl".format(k)))[0]
         if args.verbose:
             print("Loading model: {}...\n".format(os.path.basename(trained_model)))
         model = ResNet34().to(device)

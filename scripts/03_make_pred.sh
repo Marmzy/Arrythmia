@@ -7,14 +7,13 @@ function usage(){
     if [ -n "$1" ]; then
         echo -e "${RED}→ $1${CLEAR}"
     fi
-    echo "Usage: $0 [-h help] [-v verbose] [-d data] [-i imbalance] [-k kfold]"
+    echo "Usage: $0 [-h help] [-v verbose] [-d data] [- n name]"
     echo " -h, --help       Print this help and exit"
     echo " -v, --verbose    Print verbose messages"
     echo " -d, --data       Name of the data directory"
-    echo " -i, --imbalance  Strategy to alleviate class imbalance (sampling | weights)"
-    echo " -k, --kfold      Number of folds the training dataset was split into"
+    echo " -n, --name       Name of the directory containing the models to evaluate"
     echo ""
-    echo "Example: $0 -d data -i sampling -k 5"
+    echo "Example: $0 -d data -n ResNet34_sampled_lr0.001_decay0.0_epochs10_batch64_accuracy"
     exit 1
 }
 
@@ -23,18 +22,16 @@ while [[ "$#" -gt 0 ]]; do
     case $1 in
         -h|--help) usage ;;
         -v|--verbose) VERBOSE=true ;;
-        -d|--data) INPUT="$2"; shift ;;
-        -i|--imbalance) IMBALANCE="$2"; shift ;;
-        -k|--kfold) KFOLD="$2"; shift ;;
+        -d|--data) IN_DIR="$2"; shift ;;
+        -n|--name) NAME="$2"; shift ;;
     esac
     shift
 done
 
 #Verifying arguments
 if [ -z "$VERBOSE" ]; then VALUE_V=false; else VALUE_V=true; fi;
-if [ -z "$INPUT" ]; then usage "Input directory name is not specified"; else IN_DIR=$INPUT; fi;
-if [ -z "$IMBALANCE" ]; then usage "No imbalance strategy is specified"; else VALUE_I=$IMBALANCE; fi;
-if [ -z "$KFOLD" ]; then usage "Number of kfolds is not specified"; else VALUE_K=$KFOLD; fi;
+if [ -z "$IN_DIR" ]; then usage "Data directory name is not specified"; fi;
+if [ -z "$NAME" ]; then usage "Analysis directory name is not specified"; fi;
 
 
 #Asserting the directory and exists
@@ -43,32 +40,29 @@ if [ ! -d ${PWD%/*}/$IN_DIR ]; then
     exit 1
 fi
 
-#Getting the trained model stem name
-STEM=$(ls -lh ${PWD%/*}/$IN_DIR/output/* | grep "pkl$" | head -n 1 | awk '{print $9}' | cut -d'/' -f 8 | sed -e "s/_fold.*//")
-
-#Checking the available datasets
-NORM=$(ls -lh ${PWD%/*}/$IN_DIR/train/* | grep "normalised")
-NOISE=$(ls -lh ${PWD%/*}/$IN_DIR/train/* | grep "denoised")
-
-if [ -z "$NORM" ]; then VALUE_N=false; else VALUE_N=true; fi;
-if [ -z "$NOISE" ]; then VALUE_D=false; else VALUE_D=true; fi;
-
-#Passing the sampling strategy correctly
-if [ $VALUE_I == "sampling" ]; then
-    SAMPLING=true
-    WEIGHTS=false
+#Correctly passing on sampling parameters
+if [[ $NAME =~ "sampled" ]]; then
+    VALUE_S=true
+    VALUE_W=false
 else
-    SAMPLING=false
-    WEIGHTS=true
+    VALUE_S=false
+    VALUE_W=true
 fi
+
+#Correctly passing on data transformation parameters
+if [[ $NAME =~ "normalised" ]]; then VALUE_N=true; else VALUE_N=false; fi;
+if [[ $NAME =~ "denoised" ]]; then VALUE_D=true; else VALUE_D=false; fi;
+
+#Correctly passing on the number folds
+VALUE_K=$(ls -lh ${PWD%/*}/$IN_DIR/output/$NAME | awk '{print $9}' | grep ".log" | wc -l)
 
 #Evaluating the trained models
 python3  ${PWD%/*}/src/data_eval.py \
         --verbose $VALUE_V \
         --indir $IN_DIR \
-        --infiles $STEM \
+        --infiles $NAME \
         --normalised $VALUE_N \
         --denoised $VALUE_D \
         --kfold $VALUE_K \
-        --weight $WEIGHTS \
-        --sampling $SAMPLING
+        --weight $VALUE_W \
+        --sampling $VALUE_S
