@@ -1,5 +1,7 @@
 # Arrythmia
 
+![Image of MIT-BIH Heartbeats](https://archive.physionet.org/physiobank/charts/mitdb.png)
+
 A project in which I train model with the classic ResNet34 architecture to classify Normal Ectopic Heartbeats (N) from Ventricular Ectopic Heartbeats (V).
 The code allows for the handling of data imbalance using weights or undersampling, can preprocess the data automatically and allows the setting of various
 hyperparameters.
